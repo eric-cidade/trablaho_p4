@@ -174,7 +174,7 @@ control MyIngress(inout headers hdr,
             hdr.int_pai.setValid();
             hdr.ipv4.protocol             = PROTO_INT_PAI;
             hdr.int_pai.Quantidade_Filhos = 0;
-            hdr.int_pai.Tamanho_Filho     = 13;   // bytes per child (104 bits)
+            hdr.int_pai.Tamanho_Filho     = 13;   // bytes por filho (32 + 9 + 9 + 48 + 6 de padding)
         }
 
         switch_id_t.apply();
