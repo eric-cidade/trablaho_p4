@@ -7,7 +7,7 @@
       "table": "MyIngress.ipv4_lpm",
       "default_action": true,
       "action_name": "MyIngress.drop",
-      "action_params": { "id": 2 }
+      "action_params": {}
     },
     {
       "table": "MyIngress.ipv4_lpm",
@@ -41,6 +41,12 @@
         "dstAddr": "08:00:00:00:03:00",
         "port": 3
       }
+    },
+    {
+      "table": "MyIngress.switch_id_t",
+      "default_action": true,
+      "action_name": "MyIngress.set_switch_id",
+      "action_params": { "id": 2 }
     }
   ]
 }

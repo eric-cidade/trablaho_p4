@@ -4,7 +4,6 @@
 
 const bit<16> TYPE_IPV4 = 0x800;
 const bit<8> TYPE_INT_PAI = 0xFD;
-const bit<8> TYPE_INT_FILHO = 0xFE;
 
 const bit<32> MAX_HOPS = 12;
 
@@ -99,7 +98,7 @@ parser MyParser(packet_in packet,
         meta.remaining = hdr.int_pai.Quantidade_Filhos; // Armazena a quantidade de headers filhos restantes
         transition select(meta.remaining) {
             0: accept;
-            default: parse_int_filho // Protocolo para o header INT filho
+            default: parse_int_filho; // Protocolo para o header INT filho
         }
     }
 
@@ -172,7 +171,7 @@ control MyIngress(inout headers hdr,
 
             if (!hdr.int_pai.isValid()) {
             hdr.int_pai.setValid();
-            hdr.ipv4.protocol             = PROTO_INT_PAI;
+            hdr.ipv4.protocol             = TYPE_INT_PAI;
             hdr.int_pai.Quantidade_Filhos = 0;
             hdr.int_pai.Tamanho_Filho     = 13;   // bytes por filho (32 + 9 + 9 + 48 + 6 de padding)
         }
