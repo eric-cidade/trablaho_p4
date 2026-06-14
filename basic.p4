@@ -3,9 +3,13 @@
 #include <v1model.p4>
 
 const bit<16> TYPE_IPV4 = 0x800;
-const bit<8> TYPE_INT_PAI = 0xFD;
+const bit<8> TYPE_TCP = 6;
+const bit<8> TYPE_INT = 253;  // Protocolo para sinalizar presença de INT
 
 const bit<32> MAX_HOPS = 12;
+const bit<16> MTU = 1500;
+const bit<16> INT_PAI_SIZE = 12;    // Tamanho do header INT PAI em bytes (3 palavras de 32 bits)
+const bit<16> INT_CHILD_SIZE = 13; // Tamanho do header INT FILHO em bytes
 
 
 /*************************************************************************
@@ -40,6 +44,7 @@ header ipv4_t {
 header int_pai_t {
     bit<32> Tamanho_Filho;
     bit<32> Quantidade_Filhos;
+    bit<32> flags;  // bit[31:1]=reserved, bit[0]=mtu_overflow
     //* Outros Dados *//
 }
 
@@ -52,6 +57,19 @@ header int_filho_t {
     bit<6> padding; // O tamanho do header deve ser múltiplo de 8
 }
 
+header tcp_t {
+    bit<16> srcPort;
+    bit<16> dstPort;
+    bit<32> seqNo;
+    bit<32> ackNo;
+    bit<4>  dataOffset;
+    bit<4>  res;
+    bit<8>  flags;
+    bit<16> window;
+    bit<16> checksum;
+    bit<16> urgentPtr;
+}
+
 struct metadata {
     bit<32> remaining; // Campo para controlar a quantidade de headers filhos restantes a serem processados
     bit<32> switch_id; // Campo para armazenar o ID do switch atual
@@ -62,6 +80,7 @@ struct headers {
     ipv4_t       ipv4;
     int_pai_t    int_pai;
     int_filho_t[MAX_HOPS]  int_filho;
+    tcp_t        tcp;
 }
 
 /*************************************************************************
@@ -88,7 +107,8 @@ parser MyParser(packet_in packet,
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
         transition select(hdr.ipv4.protocol) {
-            TYPE_INT_PAI: parse_int_pai; // Protocolo para o header INT pai
+            TYPE_INT: parse_int_pai; // Protocolo 253 = pacote já contém headers INT
+            TYPE_TCP: parse_tcp;     // Protocolo 6 = TCP puro, sem INT ainda
             default: accept;
         }
     }
@@ -97,7 +117,7 @@ parser MyParser(packet_in packet,
         packet.extract(hdr.int_pai);
         meta.remaining = hdr.int_pai.Quantidade_Filhos; // Armazena a quantidade de headers filhos restantes
         transition select(meta.remaining) {
-            0: accept;
+            0: parse_tcp;
             default: parse_int_filho; // Protocolo para o header INT filho
         }
     }
@@ -106,9 +126,14 @@ parser MyParser(packet_in packet,
         packet.extract(hdr.int_filho.next);
         meta.remaining = meta.remaining - 1; // Decrementa a quantidade de headers filhos restantes
         transition select(meta.remaining) {
-            0: accept;
+            0: parse_tcp;
             default: parse_int_filho; // Permite múltiplos headers filhos
         }
+    }
+
+    state parse_tcp {
+        packet.extract(hdr.tcp);
+        transition accept;
     }
 
 }
@@ -169,22 +194,41 @@ control MyIngress(inout headers hdr,
         if (hdr.ipv4.isValid()) {
             ipv4_lpm.apply();
 
+            // Se não tem header INT, cria um novo
             if (!hdr.int_pai.isValid()) {
-            hdr.int_pai.setValid();
-            hdr.ipv4.protocol             = TYPE_INT_PAI;
-            hdr.int_pai.Quantidade_Filhos = 0;
-            hdr.int_pai.Tamanho_Filho     = 13;   // bytes por filho (32 + 9 + 9 + 48 + 6 de padding)
-        }
+                hdr.int_pai.setValid();
+                // Mudar protocolo de TCP(6) para INT(253) para sinalizar presença de INT
+                hdr.ipv4.protocol = TYPE_INT;
+                hdr.int_pai.Quantidade_Filhos = 0;
+                hdr.int_pai.Tamanho_Filho     = (bit<32>)INT_CHILD_SIZE;   // bytes por filho
+                hdr.int_pai.flags             = 0;  // Todos bits zerados
+                // Atualizar IPv4.totalLen para incluir o header INT Parent
+                hdr.ipv4.totalLen = hdr.ipv4.totalLen + (bit<16>)INT_PAI_SIZE;
+            }
 
-        switch_id_t.apply();
-        bit<32> idx = hdr.int_pai.Quantidade_Filhos;
-        hdr.int_filho[idx].setValid();
-        hdr.int_filho[idx].ID_Switch     = meta.switch_id;
-        hdr.int_filho[idx].Porta_Entrada = standard_metadata.ingress_port;
-        hdr.int_filho[idx].Porta_Saida   = standard_metadata.egress_spec;
-        hdr.int_filho[idx].Timestamp     = standard_metadata.ingress_global_timestamp;
-        hdr.int_filho[idx].padding       = 0;
-        hdr.int_pai.Quantidade_Filhos    = idx + 1;
+            switch_id_t.apply();
+            
+            // Verificar MTU antes de adicionar novo filho INT
+            // Tamanho IP = packet_length - 14 bytes Ethernet
+            bit<32> ip_packet_size = standard_metadata.packet_length - 14;
+            bit<32> new_ip_size = ip_packet_size + (bit<32>)INT_CHILD_SIZE;
+
+            if (new_ip_size <= (bit<32>)MTU && (hdr.int_pai.flags & 0x01) == 0) {
+                // Há espaço e não houve overflow anterior, adicionar filho
+                bit<32> idx = hdr.int_pai.Quantidade_Filhos;
+                hdr.int_filho[idx].setValid();
+                hdr.int_filho[idx].ID_Switch     = meta.switch_id;
+                hdr.int_filho[idx].Porta_Entrada = standard_metadata.ingress_port;
+                hdr.int_filho[idx].Porta_Saida   = standard_metadata.egress_spec;
+                hdr.int_filho[idx].Timestamp     = standard_metadata.ingress_global_timestamp;
+                hdr.int_filho[idx].padding       = 0;
+                hdr.int_pai.Quantidade_Filhos    = idx + 1;
+                // Atualizar IPv4.totalLen para incluir o novo INT Child
+                hdr.ipv4.totalLen = hdr.ipv4.totalLen + (bit<16>)INT_CHILD_SIZE;
+            } else {
+                // Não há espaço ou já houve overflow, marcar flag
+                hdr.int_pai.flags = hdr.int_pai.flags | 0x01;
+            }
         }
     }
 }
@@ -232,7 +276,19 @@ control MyDeparser(packet_out packet, in headers hdr) {
         packet.emit(hdr.ethernet);
         packet.emit(hdr.ipv4);
         packet.emit(hdr.int_pai);
-        packet.emit(hdr.int_filho);
+        packet.emit(hdr.int_filho[0]);
+        packet.emit(hdr.int_filho[1]);
+        packet.emit(hdr.int_filho[2]);
+        packet.emit(hdr.int_filho[3]);
+        packet.emit(hdr.int_filho[4]);
+        packet.emit(hdr.int_filho[5]);
+        packet.emit(hdr.int_filho[6]);
+        packet.emit(hdr.int_filho[7]);
+        packet.emit(hdr.int_filho[8]);
+        packet.emit(hdr.int_filho[9]);
+        packet.emit(hdr.int_filho[10]);
+        packet.emit(hdr.int_filho[11]);
+        packet.emit(hdr.tcp);
     }
 }
 

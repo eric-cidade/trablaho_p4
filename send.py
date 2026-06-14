@@ -19,19 +19,23 @@ def get_if():
     return iface
 
 def main():
-
-    if len(sys.argv)<3:
-        print('pass 2 arguments: <destination> "<message>"')
-        exit(1)
-
     addr = socket.gethostbyname(sys.argv[1])
     iface = get_if()
 
-    print("sending on interface %s to %s" % (iface, str(addr)))
-    pkt =  Ether(src=get_if_hwaddr(iface), dst='ff:ff:ff:ff:ff:ff')
-    pkt = pkt /IP(dst=addr) / TCP(dport=1234, sport=random.randint(49152,65535)) / sys.argv[2]
+    from scapy.all import getmacbyip
+    dst_mac = getmacbyip(addr)
+    if not dst_mac:
+        print(f"Could not resolve MAC for {addr}, using broadcast")
+        dst_mac = 'ff:ff:ff:ff:ff:ff'
+    
+    print(f"Destination MAC: {dst_mac}")
+    pkt = Ether(src=get_if_hwaddr(iface), dst=dst_mac)
+    pkt = pkt / IP(dst=addr) / TCP(dport=1234, sport=random.randint(49152,65535)) / sys.argv[2]
+    print("\nPacket structure:")
     pkt.show2()
+    print("\nSending packet...")
     sendp(pkt, iface=iface, verbose=False)
+    print("Packet sent!")
 
 
 if __name__ == '__main__':
