@@ -276,18 +276,7 @@ control MyDeparser(packet_out packet, in headers hdr) {
         packet.emit(hdr.ethernet);
         packet.emit(hdr.ipv4);
         packet.emit(hdr.int_pai);
-        packet.emit(hdr.int_filho[0]);
-        packet.emit(hdr.int_filho[1]);
-        packet.emit(hdr.int_filho[2]);
-        packet.emit(hdr.int_filho[3]);
-        packet.emit(hdr.int_filho[4]);
-        packet.emit(hdr.int_filho[5]);
-        packet.emit(hdr.int_filho[6]);
-        packet.emit(hdr.int_filho[7]);
-        packet.emit(hdr.int_filho[8]);
-        packet.emit(hdr.int_filho[9]);
-        packet.emit(hdr.int_filho[10]);
-        packet.emit(hdr.int_filho[11]);
+        packet.emit(hdr.int_filho);
         packet.emit(hdr.tcp);
     }
 }
