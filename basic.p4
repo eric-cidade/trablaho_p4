@@ -194,40 +194,43 @@ control MyIngress(inout headers hdr,
         if (hdr.ipv4.isValid()) {
             ipv4_lpm.apply();
 
-            // Se não tem header INT, cria um novo
-            if (!hdr.int_pai.isValid()) {
-                hdr.int_pai.setValid();
-                // Mudar protocolo de TCP(6) para INT(253) para sinalizar presença de INT
-                hdr.ipv4.protocol = TYPE_INT;
-                hdr.int_pai.Quantidade_Filhos = 0;
-                hdr.int_pai.Tamanho_Filho     = (bit<32>)INT_CHILD_SIZE;   // bytes por filho
-                hdr.int_pai.flags             = 0;  // Todos bits zerados
-                // Atualizar IPv4.totalLen para incluir o header INT Parent
-                hdr.ipv4.totalLen = hdr.ipv4.totalLen + (bit<16>)INT_PAI_SIZE;
-            }
+            // Verifica se o pacote é TCP ou se já possui cabeçalhos INT
+            if (hdr.tcp.isValid() || hdr.int_pai.isValid()) {
+                // Se não tem header INT, cria um novo
+                if (!hdr.int_pai.isValid()) {
+                    hdr.int_pai.setValid();
+                    // Mudar protocolo de TCP(6) para INT(253) para sinalizar presença de INT
+                    hdr.ipv4.protocol = TYPE_INT;
+                    hdr.int_pai.Quantidade_Filhos = 0;
+                    hdr.int_pai.Tamanho_Filho     = (bit<32>)INT_CHILD_SIZE;   // bytes por filho
+                    hdr.int_pai.flags             = 0;  // Todos bits zerados
+                    // Atualizar IPv4.totalLen para incluir o header INT Parent
+                    hdr.ipv4.totalLen = hdr.ipv4.totalLen + (bit<16>)INT_PAI_SIZE;
+                }
 
-            switch_id_t.apply();
-            
-            // Verificar MTU antes de adicionar novo filho INT
-            // Tamanho IP = packet_length - 14 bytes Ethernet
-            bit<32> ip_packet_size = standard_metadata.packet_length - 14;
-            bit<32> new_ip_size = ip_packet_size + (bit<32>)INT_CHILD_SIZE;
+                switch_id_t.apply();
+                
+                // Verificar MTU antes de adicionar novo filho INT
+                // Tamanho IP = packet_length - 14 bytes Ethernet
+                bit<32> ip_packet_size = standard_metadata.packet_length - 14;
+                bit<32> new_ip_size = ip_packet_size + (bit<32>)INT_CHILD_SIZE;
 
-            if (new_ip_size <= (bit<32>)MTU && (hdr.int_pai.flags & 0x01) == 0) {
-                // Há espaço e não houve overflow anterior, adicionar filho
-                bit<32> idx = hdr.int_pai.Quantidade_Filhos;
-                hdr.int_filho[idx].setValid();
-                hdr.int_filho[idx].ID_Switch     = meta.switch_id;
-                hdr.int_filho[idx].Porta_Entrada = standard_metadata.ingress_port;
-                hdr.int_filho[idx].Porta_Saida   = standard_metadata.egress_spec;
-                hdr.int_filho[idx].Timestamp     = standard_metadata.ingress_global_timestamp;
-                hdr.int_filho[idx].padding       = 0;
-                hdr.int_pai.Quantidade_Filhos    = idx + 1;
-                // Atualizar IPv4.totalLen para incluir o novo INT Child
-                hdr.ipv4.totalLen = hdr.ipv4.totalLen + (bit<16>)INT_CHILD_SIZE;
-            } else {
-                // Não há espaço ou já houve overflow, marcar flag
-                hdr.int_pai.flags = hdr.int_pai.flags | 0x01;
+                if (new_ip_size <= (bit<32>)MTU && (hdr.int_pai.flags & 0x01) == 0) {
+                    // Há espaço e não houve overflow anterior, adicionar filho
+                    bit<32> idx = hdr.int_pai.Quantidade_Filhos;
+                    hdr.int_filho[idx].setValid();
+                    hdr.int_filho[idx].ID_Switch     = meta.switch_id;
+                    hdr.int_filho[idx].Porta_Entrada = standard_metadata.ingress_port;
+                    hdr.int_filho[idx].Porta_Saida   = standard_metadata.egress_spec;
+                    hdr.int_filho[idx].Timestamp     = standard_metadata.ingress_global_timestamp;
+                    hdr.int_filho[idx].padding       = 0;
+                    hdr.int_pai.Quantidade_Filhos    = idx + 1;
+                    // Atualizar IPv4.totalLen para incluir o novo INT Child
+                    hdr.ipv4.totalLen = hdr.ipv4.totalLen + (bit<16>)INT_CHILD_SIZE;
+                } else {
+                    // Não há espaço ou já houve overflow, marcar flag
+                    hdr.int_pai.flags = hdr.int_pai.flags | 0x01;
+                }
             }
         }
     }
